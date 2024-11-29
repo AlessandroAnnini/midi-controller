@@ -27,8 +27,8 @@ export const FaderControl: React.FC<ControlProps> = ({
         </div>
       </div>
     </div>
-    <div className="flex items-center justify-center w-6 h-6 rounded-full bg-green-500">
-      <span className="text-xs">{label}</span>
+    <div className="flex items-center justify-center w-6 h-6 ">
+      <span className="text-xs  text-gray-400 mt-1">{label}</span>
     </div>
   </div>
 );
