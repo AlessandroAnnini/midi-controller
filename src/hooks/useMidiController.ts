@@ -1,9 +1,7 @@
 import { useReducer, useEffect, useCallback, useState } from 'react';
 import { useDebounce } from '@uidotdev/usehooks';
 
-// ------------------- Type Definitions -------------------
-
-/** Represents information about a connected MIDI device */
+// Type definitions remain the same
 interface MIDIDeviceInfo {
   id: string;
   name: string;
@@ -11,34 +9,29 @@ interface MIDIDeviceInfo {
   connection: 'open' | 'closed' | 'pending';
 }
 
-/** Configuration options for value transformation */
 interface ValueTransformer {
-  min?: number; // Minimum output value
-  max?: number; // Maximum output value
-  curve?: 'linear' | 'logarithmic' | 'exponential'; // Value scaling curve
-  step?: number; // Value quantization step
-  invert?: boolean; // Whether to invert the control
+  min?: number;
+  max?: number;
+  curve?: 'linear' | 'logarithmic' | 'exponential';
+  step?: number;
+  invert?: boolean;
 }
 
-/** Action structure for the MIDI state reducer */
 interface MIDIControllerAction {
   controller: string;
   value: number;
 }
 
-/** State structure for MIDI controller values */
 interface MIDIControllerState {
   [key: string]: number;
 }
 
-/** Mapping structure for MIDI controllers */
 interface MIDIControllersMap {
   [noteNumber: number]: {
     [command: number]: string;
   };
 }
 
-/** Configuration options for the useController hook */
 interface UseControllerOptions {
   controllers: MIDIControllersMap;
   debounceTime?: number;
@@ -47,39 +40,25 @@ interface UseControllerOptions {
   };
 }
 
-/** Possible MIDI connection states */
 export type MIDIConnectionStatus = 'disconnected' | 'connected' | 'error';
 
-/** Return type for the useController hook */
 interface UseControllerReturn {
   state: MIDIControllerState;
   status: MIDIConnectionStatus;
   connectedDevices: MIDIDeviceInfo[];
 }
 
-// ------------------- Helper Functions -------------------
-
-/**
- * Apply curve transformation to a value
- */
-const applyCurveTransformation = (
+// Simplified curve transformation
+const applyCurve = (
   value: number,
   curve: 'linear' | 'logarithmic' | 'exponential'
 ): number => {
-  switch (curve) {
-    case 'logarithmic':
-      return Math.log(1 + value * 9) / Math.log(10);
-    case 'exponential':
-      return (Math.exp(value) - 1) / (Math.E - 1);
-    default:
-      return value;
-  }
+  if (curve === 'logarithmic') return Math.log(1 + value * 9) / Math.log(10);
+  if (curve === 'exponential') return (Math.exp(value) - 1) / (Math.E - 1);
+  return value;
 };
 
-/**
- * Reducer function for managing MIDI controller state
- * Uses object spread for efficient updates
- */
+// Simple reducer
 const reducer = (
   state: MIDIControllerState,
   action: MIDIControllerAction
@@ -88,157 +67,98 @@ const reducer = (
   [action.controller]: action.value,
 });
 
-// Initial state for the MIDI controller
-const initialState: MIDIControllerState = {};
-
-// ------------------- Main Hook -------------------
-
-/**
- * A React hook for handling MIDI controller input with value transformation
- * and device connection management.
- *
- * @param options - Configuration options for the controller
- * @returns Object containing current state, connection status, and connected devices
- */
 export const useController = ({
   controllers,
   debounceTime = 0,
   valueTransformers = {},
 }: UseControllerOptions): UseControllerReturn => {
-  // State management
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [state, dispatch] = useReducer(reducer, {});
   const [status, setStatus] = useState<MIDIConnectionStatus>('disconnected');
   const [connectedDevices, setConnectedDevices] = useState<MIDIDeviceInfo[]>(
     []
   );
   const [midiMessage, setMidiMessage] =
     useState<WebMidi.MIDIMessageEvent | null>(null);
-
-  // Use useDebounce hook for debouncing MIDI messages
   const debouncedMessage = useDebounce(midiMessage, debounceTime);
 
-  /**
-   * Transforms raw MIDI values according to the specified transformation rules
-   * Memoized to prevent unnecessary recalculations
-   */
+  // Memoized transform function
   const transformValue = useCallback(
     (controller: string, rawValue: number): number => {
       const transformer = valueTransformers[controller];
       if (!transformer) return rawValue;
 
       const { min = 0, max = 1, curve = 'linear', step, invert } = transformer;
-
       let value = invert ? 1 - rawValue : rawValue;
-
-      // Apply curve transformation
-      value = applyCurveTransformation(value, curve);
-
-      // Apply range mapping
+      value = applyCurve(value, curve);
       value = min + (max - min) * value;
-
-      // Quantize to steps if specified
       return step ? Math.round(value / step) * step : value;
     },
-    [valueTransformers]
-  );
+    [JSON.stringify(valueTransformers)]
+  ); // Use JSON.stringify for deep comparison
 
-  /**
-   * Processes incoming MIDI messages
-   * Now just updates the midiMessage state which will trigger the debounced effect
-   */
+  // MIDI message handler
   const onMIDIMessage = useCallback((message: WebMidi.MIDIMessageEvent) => {
     setMidiMessage(message);
   }, []);
 
-  /**
-   * Effect to process the debounced MIDI message
-   */
+  // Process debounced MIDI messages
   useEffect(() => {
     if (!debouncedMessage) return;
 
-    try {
-      const [command, note, velocity] = debouncedMessage.data;
+    const [command, note, velocity] = debouncedMessage.data;
+    const controllerMap = controllers[note]?.[command];
 
-      // Validate controller mapping exists
-      const controllerMap = controllers[note]?.[command];
-      if (!controllerMap) {
-        console.warn(
-          `No controller mapping found for note ${note} and command ${command}`
-        );
-        return;
-      }
-
-      // Calculate and transform value
+    if (controllerMap) {
       const rawValue = Math.round((velocity / 127) * 1000) / 1000;
       const transformedValue = transformValue(controllerMap, rawValue);
-
       dispatch({ controller: controllerMap, value: transformedValue });
-    } catch (error) {
-      console.error('Error processing MIDI message:', error);
-      setStatus('error');
     }
-  }, [debouncedMessage, controllers, transformValue]);
+  }, [debouncedMessage, JSON.stringify(controllers), transformValue]);
 
-  /**
-   * Updates the list of connected devices
-   */
-  const updateConnectedDevices = useCallback(
-    (midiAccess: WebMidi.MIDIAccess) => {
-      const devices = Array.from(midiAccess.inputs.values()).map((input) => ({
-        id: input.id,
-        name: input.name || 'Unknown Device',
-        manufacturer: input.manufacturer || 'Unknown Manufacturer',
-        connection: input.connection,
-      }));
-      setConnectedDevices(devices);
-    },
-    []
-  );
+  // Handle device connections
+  const updateDevices = useCallback((midiAccess: WebMidi.MIDIAccess) => {
+    const devices = Array.from(midiAccess.inputs.values()).map((input) => ({
+      id: input.id,
+      name: input.name || 'Unknown Device',
+      manufacturer: input.manufacturer || 'Unknown Manufacturer',
+      connection: input.connection,
+    }));
+    setConnectedDevices(devices);
+  }, []);
 
-  /**
-   * Sets up MIDI access and handles device connections
-   */
+  // Initialize MIDI
   useEffect(() => {
     let midiInputs: WebMidi.MIDIInput[] = [];
 
-    // Request MIDI access
-    window.navigator
+    navigator
       .requestMIDIAccess()
       .then((midiAccess) => {
         setStatus('connected');
-        updateConnectedDevices(midiAccess);
+        updateDevices(midiAccess);
 
-        // Handle MIDI device state changes
         midiAccess.onstatechange = (event) => {
-          const newStatus =
-            event.port.state === 'connected' ? 'connected' : 'disconnected';
-          setStatus(newStatus);
-          updateConnectedDevices(midiAccess);
-
-          console.log(
-            `MIDI port ${event.port.name} ${event.port.state}:`,
-            event.port.manufacturer
+          setStatus(
+            event.port.state === 'connected' ? 'connected' : 'disconnected'
           );
+          updateDevices(midiAccess);
         };
 
-        // Set up message handlers for all inputs
         midiInputs = Array.from(midiAccess.inputs.values());
         midiInputs.forEach((input) => {
           input.onmidimessage = onMIDIMessage;
         });
       })
       .catch(() => {
-        console.log('Could not access your MIDI devices.');
+        console.log('MIDI access denied');
         setStatus('error');
       });
 
-    // Cleanup function
     return () => {
       midiInputs.forEach((input) => {
         input.onmidimessage = null;
       });
     };
-  }, [controllers, onMIDIMessage, updateConnectedDevices]);
+  }, [onMIDIMessage, updateDevices]);
 
   return { state, status, connectedDevices };
 };
