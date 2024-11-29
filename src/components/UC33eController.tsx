@@ -103,7 +103,8 @@ const Display: React.FC<DisplayProps> = ({ value }) => (
 const UC33eController: React.FC = () => {
   const { state, status, connectedDevices } = useController({
     controllers: u33e,
-    debounceTime: 16, // ~60fps
+    // debounceTime: 16, // ~60fps
+    debounceTime: 1
   });
 
   const isConnected = status === 'connected';
